@@ -1,0 +1,143 @@
+<?php 
+
+/**
+ * Implements hook_field_formatter_info().
+ */
+function commerce_discount_formatter_field_formatter_info() {
+  return array(
+  	'price_with_discount' => array(
+      'label' => 'Price with discount',
+      'description' => 'Show both full and discount prices',
+      'field types' => array('commerce_price'),
+      'settings' => array(
+        'calculation' => TRUE
+      )
+    )
+  );
+}
+
+/**
+ * Implements hook_field_formatter_prepare_view().
+ */
+function commerce_discount_formatter_field_formatter_prepare_view($entity_type, $entities, $field, $instances, $langcode, &$items, $displays) {
+  // TODO: Loop over the instances and pass them to this hook individually so we
+  // can enforce prices displaying with components as not being altered.
+
+  // Allow other modules to prepare the item values prior to formatting.
+  foreach(module_implements('commerce_price_field_formatter_prepare_view') as $module) {
+    $function = $module . '_commerce_price_field_formatter_prepare_view';
+    $function($entity_type, $entities, $field, $instances, $langcode, $items, $displays);
+  }
+}
+
+/**
+ * Implements hook_field_formatter_view()
+ */
+function commerce_discount_formatter_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  $element = array();
+  
+  // Loop through each price value in this field.
+  foreach ($items as $delta => $item) {
+    // Do not render a price if the amount is NULL (i.e. non-zero empty value).
+    if (is_null($item['amount'])) {
+      // TODO: Consider if we should render as N/A or something indicating a
+      // price was not available as opposed to just leaving a blank.
+      continue;
+    }
+
+    // Theme the display of the price based on the display type.
+    switch ($display['type']) {
+      case 'price_with_discount':
+        // Build an array of component display titles and their prices.
+        $components = array();
+        $weight = 0;
+
+        foreach ($item['data']['components'] as $key => $component) {
+          $component_type = commerce_price_component_type_load($component['name']);
+
+          if (empty($components[$component['name']])) {
+            $components[$component['name']] = array(
+              'title' => $component_type['display_title'],
+              'price' => commerce_price_component_total($item, $component['name']),
+              'weight' => $component_type['weight'],
+            );
+
+            $weight = max($weight, $component_type['weight']);
+          }
+        }
+
+        // If there is only a single component and its price equals the field's,
+        //  then remove it and just show the actual price amount.
+        if (count($components) == 1 && in_array('base_price', array_keys($components))) {
+          $components = array();
+        }
+
+        // Add the actual field value to the array.
+        $components['commerce_price_formatted_amount'] = array(
+          'title' => check_plain($instance['label']),
+          'price' => $item,
+          'weight' => $weight + 1,
+        );
+
+        // Allow other modules to alter the components.
+        drupal_alter('commerce_price_formatted_components', $components, $item, $entity);
+
+        // Sort the components by weight.
+        uasort($components, 'drupal_sort_weight');
+
+        // Format the prices for display.
+        foreach ($components as $key => &$component) {
+          $component['formatted_price'] = commerce_currency_format(
+            $component['price']['amount'],
+            $component['price']['currency_code'],
+            $entity
+          );
+        }
+
+        $element[$delta] = array(
+          '#markup' => theme('commerce_discount_formatter_price_with_discount', array('components' => $components, 'price' => $item)),
+        );
+        break;
+    }
+  }
+  
+  return $element;
+}
+
+/**
+ * Implements hook_theme().
+ */
+function commerce_discount_formatter_theme() {
+  return array(
+    'commerce_discount_formatter_price_with_discount' => array(
+      'variables' => array('components' => array(), 'price' => array()),
+    ),
+  );
+}
+
+/**
+ * Themes a price components table.
+ *
+ * @param $variables
+ *   Includes the 'components' array and original 'price' array.
+ */
+function theme_commerce_discount_formatter_price_with_discount($variables) {
+  drupal_add_css(drupal_get_path('module', 'commerce_discount_formatter') . '/css/commerce_discount_formatter.css');
+  
+  $output = '<div class="commerce_discount_formatter_price_with_discount">';
+  $rows = array();
+  
+  $output .= '<ul>';
+  if(isset($variables['components']['base_price'])) {
+    
+    $output .= '<li class="initial_price">';
+    $output .= '<span class="price_value">' . $variables['components']['base_price']['formatted_price'] . '</span>';
+    $output .= '</li>';
+  }
+  $output .= '<li class="discount_price">';
+  $output .= '<span class="price_value">' . $variables['components']['commerce_price_formatted_amount']['formatted_price'] . '</span>';
+  $output .= '</li>';
+  $output .= '</ul>';
+  $output .= '</div>';
+  return $output;
+}

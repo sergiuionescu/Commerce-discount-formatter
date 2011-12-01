@@ -1,0 +1,13 @@
+.commerce_discount_formatter_price_with_discount{
+  text-transform: lowercase;
+}
+.commerce_discount_formatter_price_with_discount .initial_price{
+	color:grey;
+	text-decoration: line-through;
+	font-size:1.1em;
+}
+.commerce_discount_formatter_price_with_discount li{
+	list-style:none;
+	float:left;
+	margin-right:1em;
+}
